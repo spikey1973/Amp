@@ -1,0 +1,115 @@
+//led calibration manually 
+
+// from Example 5 - Receive with start- and end-markers combined with parsing
+
+#include <FastLED.h>
+
+#define    NUM_LEDS             1      // P9813 module: string is one l
+#define    CLOCK_PIN            4      // Clock and data pins for LED data
+#define    DATA_PIN             5 
+CRGB leds[NUM_LEDS];
+
+const byte numChars = 32;
+char receivedChars[numChars];
+char tempChars[numChars];        // temporary array for use when parsing
+
+      // variables to hold the parsed data
+int RedFromPC = 0;
+int GreenFromPC = 0;
+int BlueFromPC = 0;
+
+boolean newData = false;
+ 
+//============
+
+void parseData() {      // split the data into its parts
+
+    char * strtokIndx; // this is used by strtok() as an index
+
+    strtokIndx = strtok(receivedChars,","); // get the first part - the string
+    RedFromPC = atoi(strtokIndx);           // convert this part to an integer
+    
+    strtokIndx = strtok(NULL, ",");         // this continues where the previous call left off
+    GreenFromPC = atoi(strtokIndx);         // convert this part to an integer
+     
+    strtokIndx = strtok(NULL, ",");         // this continues where the previous call left off
+    BlueFromPC = atoi(strtokIndx);          // convert this part to an integer
+}
+
+//============
+
+void showParsedData() {
+    Serial.print("Red ");
+    Serial.println(RedFromPC);
+    Serial.print("Green ");
+    Serial.println(GreenFromPC);
+    Serial.print("Blue ");
+    Serial.println(BlueFromPC);
+}
+
+//============
+
+void recvWithStartEndMarkers() {
+    static boolean recvInProgress = false;
+    static byte ndx = 0;
+    char startMarker = '<';
+    char endMarker = '>';
+    char rc;
+
+    while (Serial.available() > 0 && newData == false) {
+        rc = Serial.read();
+
+        if (recvInProgress == true) {
+            if (rc != endMarker) {
+                receivedChars[ndx] = rc;
+                ndx++;
+                if (ndx >= numChars) {
+                    ndx = numChars - 1;
+                }
+            }
+            else {
+              Serial.println("else");
+                receivedChars[ndx] = '\0'; // terminate the string
+                recvInProgress = false;
+                ndx = 0;
+                newData = true;
+            }
+        }
+
+        else if (rc == startMarker) {
+          Serial.println("rc== endMarker");
+            recvInProgress = true;
+        }
+    }
+}
+
+//============
+
+void setup() {
+    LEDS.addLeds<P9813, DATA_PIN, CLOCK_PIN>(leds, NUM_LEDS);  // initialize LED control object
+    Serial.begin(9600);
+    Serial.println("This expects 3 pieces of data - red, green and blue");
+    Serial.println("value between 0 and 25 ");
+    Serial.println();
+    
+    FastLED.addLeds<P9813, DATA_PIN, CLOCK_PIN>(leds, NUM_LEDS);  // initialize LED control object
+    Serial.println("p9813 ge-init");
+}
+
+//============
+
+void loop() {
+    recvWithStartEndMarkers();
+    if (newData == true) {
+        strcpy(tempChars, receivedChars);
+            // this temporary copy is necessary to protect the original data
+            //   because strtok() used in parseData() replaces the commas with \0
+        parseData();
+        showParsedData();
+        newData = false;
+    }
+    leds[0].setRGB( RedFromPC, GreenFromPC, BlueFromPC);
+    FastLED.show(); 
+    delay(30); 
+}
+
