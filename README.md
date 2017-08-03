@@ -1,7 +1,8 @@
 # Amp
 this is a program to be! and is not ready yet and will not be for a long time. 
 
-it's function is to do the following.
+it's function is to do the following.  
+
 via a arduino mega board control fan speed and RGB led controller by a measured and averaged temperature 
 
 this program to be is meant to do this by the following step. 
