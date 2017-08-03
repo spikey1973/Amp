@@ -1,0 +1,229 @@
+#include <FastLED.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+//source: <!-- m --><a class="postlink" href="http://www.electroschematics.com/9540/arduino-fan-speed-controlled-temperature/">http://www.electroschematics.com/9540/a ... mperature/</a><!-- m -->
+ 
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);    // I2C Liquid Crystal
+
+// pin definitions
+const int tempPin1  = A6;   // the output pin of LM35-1
+const int tempPin2  = A7;   // the output pin of LM35-2
+const int tempPin3  = A8;   // the output pin of LM35-3
+const int tempPin4  = A9;   // the output pin of LM35-4
+const int tempPin5  = A10;   // the output pin of LM35-5
+const int tempPin6  = A11;   // the output pin of LM35-6
+const int tempPin7  = A12;   // the output pin of LM35-7
+const int tempPin8  = A13;   // the output pin of LM35-8
+const int fan       = 11;   // the pin where fan is
+
+// defined pins
+#define NUM_LEDS 1       // Since the LEDs are being controlled with a P9813 module, there is only '1' LED
+#define CLOCK_PIN 4
+#define DATA_PIN 5       // Clock and data pins for LED data
+
+// program constants
+const int   tempMin = 30;           // the temperature to start the fan
+const int   tempMax = 50;           // the maximum temperature when fan is at 100%
+const int   UPDATE_LCD_SPEED = 500; // Update LCD every 500 ms
+
+// global variables
+uint8_t     AnalogPinArray[8]= {tempPin1, tempPin2, tempPin3, tempPin4, tempPin5, tempPin6, tempPin7, tempPin8 };
+uint8_t     temp[8];                // array of temperatures per analog port
+uint8_t     sensor[8];              // array of temp of spec sensor or calculations
+boolean     BelowMin = false;       // determines if any temperature is below tempMin
+int         tempHigh;               // highest read temperature of all ports
+int         fanSpeed;               // speed for the fan
+int         fanLCD;                 // percentage of fanspeed
+int         r;                      // intensiteit rode led
+int         g;                      // intensiteit rode led
+int         b;                      // intensiteit rode led
+
+
+// uint32_t    timer;                  // timer used for scrolling LCD
+
+CRGB leds[NUM_LEDS];     // Define LED object
+
+// various program control variables
+int cycleTime =  10;                
+int blinkTime = 1000;
+byte mode = 1;
+boolean RGBMode;
+boolean on = false;
+
+//
+void setup() {
+    //
+    // setup output ports. Default is Input mode
+    //
+    pinMode(fan, OUTPUT);
+    //
+    // set output ports
+    //
+    analogWrite(fan, 0);        // stop fan
+    //
+    // other initialization activities
+    //
+    delay(2000);
+    
+    LEDS.addLeds<P9813, DATA_PIN, CLOCK_PIN>(leds, NUM_LEDS);  // initialize LED control object
+    Serial.begin(115200);       // Used to type in characters
+    Serial.println("--- Start Serial Monitor ---");
+    lcd.begin(16, 2);           // initialize LCD
+    lcd.clear();                // clear screen
+    // timer = millis();           // start timer for LCD updates
+}
+
+// main loop
+void loop() {
+    //
+    // local variables
+    //
+    char lcdMsg[17];            // use a temp char array for LCD displaying row
+    //
+    // execute loop
+    //
+    BelowMin = false;           // assume all temperatures are above tempMin
+    //
+    // read all analog inputs
+    //
+    for (uint8_t i = 0; i < 8; i++) {
+        //
+        // get the temperature into our temp array
+        //
+        temp[i] = readTemp(i);
+
+        //
+        // check if any temperature is below tempMin
+        //
+        if (temp[i] < tempMin) {
+            BelowMin = true;    // this is one
+        }
+        //
+        // get the highest temperature
+        //
+        if(i == 0) {
+            //
+            // this is the first temperature read so it is automatically the highest
+            //
+            tempHigh = temp[i];
+            Serial.print("tempHigh ");
+            Serial.print(" : ");
+            Serial.println(tempHigh);
+            Serial.println();
+        } 
+        else {
+            //
+            // all other temperatures are compared to the current tempHigh
+            //
+            if (temp[i] > tempHigh) {
+                //
+                // got one
+                //
+                tempHigh = temp[i];
+            }
+        }
+    }
+    
+    //
+    // check if any temperature was below min
+    //
+    if (BelowMin = true) {
+        fanSpeed = 0;               // stop fan
+        leds[0].setRGB(255, 255, 255);
+
+        
+    } else {
+        
+        //
+        // we are above temp min so determine the fan speed
+        //
+        fanSpeed    = map(tempHigh, tempMin, tempMax, 122, 255);    // the actual speed of fan
+        Serial.print("fanSpeed : ");
+        Serial.println(fanSpeed);
+        fanLCD      = map(tempHigh, tempMin, tempMax, 0, 100);      // speed of fan to display on LCD
+        Serial.print("fanLCD: ");
+        Serial.println(fanLCD);
+        
+        //
+        // set color and intensity depending on temperature and equal to fanspeed
+        //
+        r           = map(tempHigh, tempMin, tempMax, 122, 255);    // change the color of the red led linearly to the fanspeed
+        Serial.print("Red : ");       
+        Serial.println(r);
+        g           = 122;
+        b           = 377-r;                                        // change the color of the blue led inverse to the red led   
+    }
+    
+    //
+    // if we are exceeding the max permissable temperature
+    //
+    if (tempHigh > tempMax) {                                        // if temp1 is higher than tempMax
+        fanSpeed = 255;  
+        leds[0] = CRGB::Red;
+        FastLED.show();
+        delay(blinkTime);
+        leds[0] = CRGB::Black;
+        FastLED.show();
+        delay(blinkTime);
+    
+        //
+        // update our fan speed
+        //
+        analogWrite(fan, fanSpeed);                                 // spin the fan at the fanSpeed speed
+    }
+    
+    //
+    // Do we have to update the LCD?
+    //
+    // if (millis() - timer > UPDATE_LCD_SPEED) {        // oude timer 
+    //
+    // calculate the average of last 50 measurements
+    //
+    for (uint8_t j = 0; j < 7; j++) {                    // sensor waarde op 0 stellen voor berekening
+         sensor[j] = 0;
+        }
+        for (uint8_t i = 0; i < 49; i++) {               // 50 metingen doen
+          for (uint8_t j = 0; j < 7; j++) {              // voor elk van de 8 sensoren
+          sensor[j] += temp[j];
+          }   
+          if (i = 49) {                                  // na 50x sommatie
+            for (uint8_t j = 0; j < 7; j++) {            
+            sensor[j] = int((float)sensor[j] / i);       // bereken gemiddelde
+            }
+          }
+        }
+        
+        //
+        // update the LCD
+        //
+        sprintf(lcdMsg, "%2d,%2d,%2d,%2d:%3d", sensor[0], sensor[1], sensor[2], sensor[3], fanSpeed);
+        lcd.setCursor(0, 0);
+        lcd.print(lcdMsg);
+ 
+        sprintf(lcdMsg, "%2d,%2d,%2d,%2d:%3d", sensor[4], sensor[5], sensor[6], sensor[7], fanLCD);
+        lcd.setCursor(0, 1);
+        lcd.print(lcdMsg);
+        //
+        // start the timer for the next time
+        //
+        // timer = millis();                              // oude timer reset 
+   }
+}
+/**
+ * @name    readTemp
+ * @param   portIndex index to AnalogPinArray referencing the correct analog port
+ * @returns Integer value with temperature in degrees Celcius (no decimals)
+ * This routine reads the indicated analog port and converts a read 16 bit number into
+ * a temperature in degrees Celcius.
+ */
+int readTemp(uint8_t portIndex) {  // get the temperature and convert it to celsius
+    //
+    // read the requested analog port
+    //
+    uint16_t temp = analogRead(AnalogPinArray[portIndex]);
+    //
+    // convert and return its temperature in Celcius
+    //
+    return int((float)temp * 0.48828125);
+}
