@@ -1,0 +1,254 @@
+#include <stdio.h>
+#include <FastLED.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);    // I2C Liquid Crystal
+
+// defined values
+#define    MAX_Nr_READINGS     10                         // Array size
+#define    NUM_LEDS             1                         // P9813 module: string is one l
+#define    CLOCK_PIN            4                         // Clock and data pins for LED data
+#define    DATA_PIN             5 
+
+// Define LED object
+CRGB       leds[NUM_LEDS];              
+
+extern const uint8_t gamma8[];
+
+// pin definitions
+const byte tempSensorPins[]        = { A6, A7 /*, A8, A9, A10, A11, A12, A13, A14*/ };
+const byte numSensors              = sizeof(tempSensorPins) / sizeof(tempSensorPins[0]); // # active sen
+const int  fan                     = 11;                  // the pin where fan is
+
+// global constants
+const int  tempMin                 = 30;                  // the temperature to start the fan
+const int  tempMax                 = 50;                  // the maximum temperature when fan is at 100%
+const int  UPDATE_LCD_SPEED        = 500;                 // Update LCD every 500 ms
+
+// global variables
+int        readings[numSensors][MAX_Nr_READINGS];         // 2D array
+int        tempHigh;                                      // highest read temperature of all ports
+int        fanSpeed;                                      // speed for the fan
+int        fanLCD;                                        // percentage of fanspeed
+int        n;
+byte       r;                                             // intensiteit rode led
+byte       g;                                             // intensiteit groen led
+byte       b;                                             // intensiteit blauw led
+byte       index                   = 0 ;
+byte       avgSensor[numSensors];
+
+// various program control variables
+int       cycleTime                = 10;                
+int       blinkTime                = 1000;
+byte      mode                     = 1;
+
+// booleans
+boolean   arraysAreReady = false;
+boolean   BelowMin       = false;
+boolean   on             = false;
+boolean   RGBMode        = true;
+
+//-------------------------------------------------------------------------------------------------------------------
+void readTemperatureSensors() {
+  
+  for (int sensor = 0; sensor < numSensors; sensor++)
+    readings[sensor][index] = analogRead(tempSensorPins[sensor]) * 0.48828125;
+
+  if (++index >= MAX_Nr_READINGS) {
+    arraysAreReady = true;
+    index = 0;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------------------------
+int calcAvgArray(int *readings) {
+  
+  long sum = 0UL;
+  
+  if (arraysAreReady) {
+    
+    // we know we have MAX_Nr_READINGS correct values
+    for (int n = 0; n < MAX_Nr_READINGS; n++) {sum += readings[n];}
+    return avgSensor[n] = sum / MAX_Nr_READINGS;
+    
+  } else {
+    
+    // we don't have a full array, only up to index-1
+    if (index) {
+      
+      // we have at least 1 reading
+      for (byte n = 0; n < index; n++) sum += readings[n];
+      return avgSensor[n] = sum / index;
+      
+    } else {
+      
+      // we have never put any value in the array, return error flag
+      return -1; // indicate error
+    }
+  }
+}
+
+/*-------------------------------------------------------------------------------------------------------------------
+void displayAverages() {
+  
+  Serial.print("Index is = ");
+  Serial.print(index);
+  
+  for (int sensor = 0; sensor < numSensors; sensor++) {
+    
+    Serial.print(" : ");
+    Serial.print(calcAvgArray(readings[sensor]));
+  }
+  
+  Serial.println();
+}*/
+ 
+//-------------------------------------------------------------------------------------------------------------------
+void highTemp () {
+
+  // loop to read all analog inputs
+  for (uint8_t n = 0; n < numSensors; n++) {                      // loop door de sens
+
+    // check if any temperature is below tempMin
+    if (avgSensor[n] < tempMin) {  
+      BelowMin = true;       // if there is one
+    }
+  
+    // get the highest temperature
+    if(n == 0) {
+      tempHigh = avgSensor[n];    // this is the first temperature read so it is automatically the highest
+      
+    } else {
+            
+      // all other temperatures are compared to the current tempHigh
+      if (avgSensor[n] > tempHigh) {
+
+        // got one
+        tempHigh = avgSensor[n];
+      }
+    }                       
+  }
+Serial.print("exit highTemp");  
+} 
+ 
+//-------------------------------------------------------------------------------------------------------------------
+void controller_Function () {
+
+  //-----------------------------------------------------------------------------------------------------------------
+  // if tempHigh is low
+  if (tempHigh < tempMin) {
+    
+    // we are above temp min
+    fanSpeed = 0;
+
+    // stop fan
+    leds[0].setRGB(255, 75, 75);
+    FastLED.show();
+    delay(30);
+  }
+  
+  //-----------------------------------------------------------------------------------------------------------------
+  // if tempHigh is mid        
+  if (tempHigh > tempMin && tempHigh < tempMax) {
+
+    // we are above temp min so determine the fan speed
+    fanSpeed    = map(tempHigh, tempMin, tempMax, 122, 255);    // the actual speed of fan
+    fanLCD      = map(tempHigh, tempMin, tempMax, 0, 100);      // speed of fan to display on LCD
+
+    // set color and intensity depending on temperature and equal to fanspeed
+    byte Ret    = map(tempHigh, tempMin, tempMax, 127, 255);    // change the color of the red led linearly to the fanspeed
+    r           = pgm_read_byte(&gamma8[Ret]);
+    g           = pgm_read_byte(&gamma8[127]);                  // cte
+    b           = pgm_read_byte(&gamma8[377-Ret]);              // inverse tov rood
+    leds[0].setRGB(r, g, b);
+    FastLED.show();
+    delay(30);
+  }
+  
+  //-----------------------------------------------------------------------------------------------------------------
+  // if tempHigh is high  
+  if (tempHigh > tempMax) {      // if temp1 is higher than tempMax
+  
+    fanSpeed = 255;
+    
+    leds[0] = CRGB::Red;
+    FastLED.show();
+    delay(blinkTime);
+    
+    leds[0] = CRGB::Black;
+    FastLED.show();
+    delay(blinkTime);
+  }
+  
+  // update our fan speed
+  analogWrite(fan, fanSpeed);                                   // spin the fan at the fanSpeed speed
+}
+
+//-------------------------------------------------------------------------------------------------------------------
+void LCD_controller () {
+  
+  //local variables
+  int  fanSpeed;               // speed for the fan
+  char lcdMsg[17];             // use a temp char array for LCD displaying row
+  
+  // function
+  sprintf(lcdMsg, "%2d,%2d,%2d,%2d:%2d%", avgSensor[0]/*, avgSensor[2], avgSensor[4], avgSensor[6], avgSensor[8]*/);
+  lcd.setCursor(0, 0);
+  lcd.print(lcdMsg);
+  
+  sprintf(lcdMsg, "%2d,%2d,%2d,%2d: %3d%%", avgSensor[1]/*, avgSensor[3], avgSensor[5], avgSensor[7],*/, fanLCD);
+  lcd.setCursor(0, 1);
+  lcd.print(lcdMsg);
+}
+
+//-------------------------------------------------------------------------------------------------------------------
+void setup() {
+   
+    // setup output ports. Default is Input mode
+    pinMode(fan, OUTPUT);
+   
+    // init output ports
+    analogWrite(fan, 0);                                        // stop fan
+   
+    //init Leds
+    LEDS.addLeds<P9813, DATA_PIN, CLOCK_PIN>(leds, NUM_LEDS);   // initialize LED control object
+    
+    // init LCD
+    lcd.begin(16, 2);                                           // initialize LCD
+    lcd.clear();                                                // clear screen
+    // timer = millis();                                        // start timer for LCD updates  
+    
+    // other initialization activities
+    Serial.begin(9600);
+    delay(1000);
+}
+
+//-------------------------------------------------------------------------------------------------------------------
+void loop () {
+  Serial.print(numSensors);
+  readTemperatureSensors(); // add a new value into the arrays
+  //displayAverages();      // running average
+  int results = calcAvgArray(readings); // 
+  highTemp();               // determine higest tempereature this cycle of the loop 
+  LCD_controller();         // display values on LCD
+  controller_Function();    // set fan speed and led colour
+}
+
+const uint8_t PROGMEM gamma8[] = {
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,
+    1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  2,  2,
+    2,  3,  3,  3,  3,  3,  3,  3,  4,  4,  4,  4,  4,  5,  5,  5,
+    5,  6,  6,  6,  6,  7,  7,  7,  7,  8,  8,  8,  9,  9,  9, 10,
+   10, 10, 11, 11, 11, 12, 12, 13, 13, 13, 14, 14, 15, 15, 16, 16,
+   17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 22, 23, 24, 24, 25,
+   25, 26, 27, 27, 28, 29, 29, 30, 31, 32, 32, 33, 34, 35, 35, 36,
+   37, 38, 39, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 50,
+   51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 66, 67, 68,
+   69, 70, 72, 73, 74, 75, 77, 78, 79, 81, 82, 83, 85, 86, 87, 89,
+   90, 92, 93, 95, 96, 98, 99,101,102,104,105,107,109,110,112,114,
+  115,117,119,120,122,124,126,127,129,131,133,135,137,138,140,142,
+  144,146,148,150,152,154,156,158,160,162,164,167,169,171,173,175,
+  177,180,182,184,186,189,191,193,196,198,200,203,205,208,210,213,
+  215,218,220,223,225,228,231,233,236,239,241,244,247,249,252,255 };
